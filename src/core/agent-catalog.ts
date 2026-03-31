@@ -51,6 +51,14 @@ export const RUNTIME_AGENT_CATALOG: RuntimeAgentCatalogEntry[] = [
 		installUrl: "https://docs.factory.ai/cli/getting-started/quickstart",
 	},
 	{
+		id: "pi",
+		label: "Pi",
+		binary: "pi",
+		baseArgs: [],
+		autonomousArgs: [],
+		installUrl: "https://github.com/badlogic/pi-mono",
+	},
+	{
 		id: "gemini",
 		label: "Gemini CLI",
 		binary: "gemini",
@@ -67,6 +75,7 @@ export const RUNTIME_LAUNCH_SUPPORTED_AGENT_IDS: readonly RuntimeAgentId[] = [
 	"claude",
 	"codex",
 	"droid",
+	"pi",
 	// "opencode",
 	// "gemini",
 ];

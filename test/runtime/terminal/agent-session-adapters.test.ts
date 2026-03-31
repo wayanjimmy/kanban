@@ -355,6 +355,31 @@ describe("prepareAgentLaunch hook strategies", () => {
 		expect(launch.deferredStartupInput?.endsWith("\r")).toBe(true);
 	});
 
+	it("writes Pi extension and injects -e for hooks", async () => {
+		setupTempHome();
+		const launch = await prepareAgentLaunch({
+			taskId: "task-pi",
+			agentId: "pi",
+			binary: "pi",
+			args: [],
+			cwd: "/tmp",
+			prompt: "Investigate flaky tests",
+			workspaceId: "workspace-1",
+		});
+
+		expect(launch.env.KANBAN_HOOK_TASK_ID).toBe("task-pi");
+		expect(launch.env.KANBAN_HOOK_WORKSPACE_ID).toBe("workspace-1");
+		const extensionArgIndex = launch.args.indexOf("-e");
+		expect(extensionArgIndex).toBeGreaterThanOrEqual(0);
+		const extensionPath = launch.args[extensionArgIndex + 1];
+		expect(extensionPath).toBeDefined();
+		expect(readFileSync(extensionPath ?? "", "utf8")).toContain('pi.on("turn_start"');
+		expect(readFileSync(extensionPath ?? "", "utf8")).toContain("hooks");
+		expect(readFileSync(extensionPath ?? "", "utf8")).toContain("--source");
+		expect(readFileSync(extensionPath ?? "", "utf8")).toContain("pi");
+		expect(launch.args).toContain("Investigate flaky tests");
+	});
+
 	it("writes Cline hook scripts and injects --hooks-dir", async () => {
 		setupTempHome();
 		const launch = await prepareAgentLaunch({
@@ -483,6 +508,17 @@ describe("prepareAgentLaunch hook strategies", () => {
 		});
 		expect(droidLaunch.args).toContain("--resume");
 
+		const piLaunch = await prepareAgentLaunch({
+			taskId: "task-pi",
+			agentId: "pi",
+			binary: "pi",
+			args: [],
+			cwd: "/tmp",
+			prompt: "",
+			resumeFromTrash: true,
+		});
+		expect(piLaunch.args).toContain("-c");
+
 		const clineLaunch = await prepareAgentLaunch({
 			taskId: "task-cline",
 			agentId: "cline",
@@ -530,6 +566,17 @@ describe("prepareAgentLaunch hook strategies", () => {
 			prompt: "",
 		});
 		expect(geminiLaunch.args).toContain("--yolo");
+
+		const piLaunch = await prepareAgentLaunch({
+			taskId: "task-pi-auto",
+			agentId: "pi",
+			binary: "pi",
+			args: [],
+			autonomousModeEnabled: true,
+			cwd: "/tmp",
+			prompt: "",
+		});
+		expect(piLaunch.args).not.toContain("--yes");
 
 		const clineLaunch = await prepareAgentLaunch({
 			taskId: "task-cline-auto",

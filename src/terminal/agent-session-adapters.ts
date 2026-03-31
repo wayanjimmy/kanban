@@ -580,6 +580,139 @@ function buildOpenCodePluginContent(
 `;
 }
 
+function buildPiExtensionContent(): string {
+	const inProgressArgs = JSON.stringify(
+		buildHooksCommandParts(["notify", "--event", "to_in_progress", "--source", "pi"]),
+	);
+	const reviewArgs = JSON.stringify(buildHooksCommandParts(["notify", "--event", "to_review", "--source", "pi"]));
+	const activityArgs = JSON.stringify(buildHooksCommandParts(["notify", "--event", "activity", "--source", "pi"]));
+	return `import { spawn } from "node:child_process";
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return null;
+	}
+	return value as Record<string, unknown>;
+}
+
+function normalizeText(value: string): string {
+	return value.replace(/\\s+/g, " ").trim();
+}
+
+function extractText(content: unknown): string | null {
+	if (typeof content === "string") {
+		const text = normalizeText(content);
+		return text.length > 0 ? text : null;
+	}
+	if (!Array.isArray(content)) {
+		return null;
+	}
+	const segments: string[] = [];
+	for (const item of content) {
+		const record = asRecord(item);
+		if (!record || record.type !== "text") {
+			continue;
+		}
+		const text = typeof record.text === "string" ? normalizeText(record.text) : "";
+		if (text.length > 0) {
+			segments.push(text);
+		}
+	}
+	if (segments.length === 0) {
+		return null;
+	}
+	return normalizeText(segments.join("\\n"));
+}
+
+function extractLastAssistantMessageFromAgentEnd(event: unknown): string | null {
+	const record = asRecord(event);
+	if (!record) {
+		return null;
+	}
+	const messages = Array.isArray(record.messages) ? record.messages : [];
+	for (let index = messages.length - 1; index >= 0; index -= 1) {
+		const messageRecord = asRecord(messages[index]);
+		if (!messageRecord || messageRecord.role !== "assistant") {
+			continue;
+		}
+		const text = extractText(messageRecord.content);
+		if (text) {
+			return text;
+		}
+	}
+	return null;
+}
+
+function runHook(baseArgs: string[], payload: Record<string, unknown>): void {
+	try {
+		const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
+		const args = [...baseArgs, "--metadata-base64", encodedPayload];
+		const child = spawn(args[0] ?? "", args.slice(1), {
+			detached: true,
+			stdio: "ignore",
+			windowsHide: true,
+			env: process.env,
+		});
+		child.unref();
+	} catch {
+		// Best effort only.
+	}
+}
+
+export default function (pi) {
+	if (!process?.env?.KANBAN_HOOK_TASK_ID) {
+		return;
+	}
+
+	const sessionFile = pi?.sessionManager?.getSessionFile?.() ?? null;
+	const buildMetadata = (hookEventName: string) => ({
+		hook_event_name: hookEventName,
+		session_file: typeof sessionFile === "string" ? sessionFile : undefined,
+	});
+
+	pi.on("turn_start", async () => {
+		runHook(${inProgressArgs}, buildMetadata("turn_start"));
+	});
+
+	pi.on("turn_end", async (event) => {
+		const eventRecord = asRecord(event);
+		const turnMessage = eventRecord ? asRecord(eventRecord.message) : null;
+		const lastAssistantMessage = turnMessage ? extractText(turnMessage.content) : null;
+		runHook(${reviewArgs}, {
+			...buildMetadata("turn_end"),
+			last_assistant_message: lastAssistantMessage ?? undefined,
+		});
+	});
+
+	pi.on("agent_end", async (event) => {
+		const lastAssistantMessage = extractLastAssistantMessageFromAgentEnd(event);
+		runHook(${reviewArgs}, {
+			...buildMetadata("agent_end"),
+			last_assistant_message: lastAssistantMessage ?? undefined,
+		});
+	});
+
+	pi.on("tool_call", async (event) => {
+		const eventRecord = asRecord(event);
+		const toolName = eventRecord && typeof eventRecord.toolName === "string" ? eventRecord.toolName : undefined;
+		runHook(${activityArgs}, {
+			...buildMetadata("tool_call"),
+			tool_name: toolName,
+		});
+	});
+
+	pi.on("tool_result", async (event) => {
+		const eventRecord = asRecord(event);
+		const toolName = eventRecord && typeof eventRecord.toolName === "string" ? eventRecord.toolName : undefined;
+		runHook(${activityArgs}, {
+			...buildMetadata("tool_result"),
+			tool_name: toolName,
+		});
+	});
+}
+`;
+}
+
 function getHookAgentDirectory(agentId: RuntimeAgentId): string {
 	return join(getRuntimeHomePath(), "hooks", agentId);
 }
@@ -1271,6 +1404,59 @@ const droidAdapter: AgentSessionAdapter = {
 	},
 };
 
+const piAdapter: AgentSessionAdapter = {
+	async prepare(input) {
+		const args = [...input.args];
+		const env: Record<string, string | undefined> = {};
+		let prompt = input.prompt;
+
+		if (input.resumeFromTrash && !hasCliOption(args, "-c")) {
+			args.push("-c");
+		}
+
+		if (input.startInPlanMode) {
+			const planModePrefix =
+				"Start in planning mode. First, provide a concise execution plan as numbered steps. Do not modify files or run write operations until the user approves the plan.";
+			const trimmedPrompt = prompt.trim();
+			prompt = trimmedPrompt.length > 0 ? `${planModePrefix}\n\n${trimmedPrompt}` : planModePrefix;
+		}
+
+		const hooks = resolveHookContext(input);
+		if (hooks) {
+			const extensionPath = join(getHookAgentDirectory("pi"), "kanban-ext.ts");
+			await ensureTextFile(extensionPath, buildPiExtensionContent());
+			if (!hasCliOption(args, "-e") && !hasCliOption(args, "--extension")) {
+				args.push("-e", extensionPath);
+			}
+			Object.assign(
+				env,
+				createHookRuntimeEnv({
+					taskId: hooks.taskId,
+					workspaceId: hooks.workspaceId,
+				}),
+			);
+		}
+
+		const appendedSystemPrompt = resolveHomeAgentAppendSystemPrompt(input.taskId);
+		if (
+			appendedSystemPrompt &&
+			!hasCliOption(args, "--append-system-prompt") &&
+			!hasCliOption(args, "--system-prompt")
+		) {
+			args.push("--append-system-prompt", appendedSystemPrompt);
+		}
+
+		const withPromptLaunch = withPrompt(args, prompt, "append");
+		return {
+			...withPromptLaunch,
+			env: {
+				...withPromptLaunch.env,
+				...env,
+			},
+		};
+	},
+};
+
 const clineAdapter: AgentSessionAdapter = {
 	async prepare(input) {
 		const args = [...input.args];
@@ -1334,6 +1520,7 @@ const ADAPTERS: Record<RuntimeAgentId, AgentSessionAdapter> = {
 	gemini: geminiAdapter,
 	opencode: opencodeAdapter,
 	droid: droidAdapter,
+	pi: piAdapter,
 	cline: clineAdapter,
 };
 

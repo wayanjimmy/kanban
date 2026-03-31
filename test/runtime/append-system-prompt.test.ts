@@ -119,4 +119,17 @@ describe("resolveHomeAgentAppendSystemPrompt", () => {
 		expect(prompt).toContain("Current home agent: `droid`");
 		expect(prompt).toContain("droid mcp add linear https://mcp.linear.app/mcp --type http");
 	});
+
+	it("returns active-agent guidance for pi home sidebar sessions", () => {
+		const prompt = resolveHomeAgentAppendSystemPrompt("__home_agent__:workspace-1:pi", {
+			currentVersion: "0.1.10",
+			cwd: "/Users/example/repo",
+			execPath: "/usr/local/bin/node",
+			execArgv: [],
+			argv: ["node", "/Users/example/repo/dist/cli.js"],
+			resolveRealPath: (path) => path,
+		});
+		expect(prompt).toContain("Current home agent: `pi`");
+		expect(prompt).toContain("Pi MCP extension/package for Linear");
+	});
 });

@@ -15,6 +15,7 @@ import {
 	startCodexSessionWatcher,
 } from "./codex-hook-events";
 import { enrichDroidReviewMetadata } from "./droid-hook-events";
+import { enrichPiReviewMetadata } from "./pi-hook-events";
 
 export {
 	createCodexWatcherState,
@@ -312,6 +313,13 @@ export function inferHookSourceFromPayload(payload: Record<string, unknown> | nu
 	if (normalizedTranscriptPath?.includes("/.factory/")) {
 		return "droid";
 	}
+	const sessionFile = payload
+		? (readStringField(payload, "session_file") ?? readStringField(payload, "sessionFile"))
+		: null;
+	const normalizedSessionFile = sessionFile?.replaceAll("\\", "/").toLowerCase() ?? null;
+	if (normalizedSessionFile?.includes("/.pi/agent/sessions/")) {
+		return "pi";
+	}
 	if (payload && readStringField(payload, "type") === "agent-turn-complete") {
 		return "codex";
 	}
@@ -514,7 +522,8 @@ async function runHooksNotify(
 		const stdinPayload = await readStdinText();
 		const parsedArgs = parseHooksIngestArgs(event, options, payloadArg, stdinPayload);
 		const codexEnrichedArgs = await enrichCodexReviewMetadata(parsedArgs, process.cwd());
-		const args = await enrichDroidReviewMetadata(codexEnrichedArgs);
+		const droidEnrichedArgs = await enrichDroidReviewMetadata(codexEnrichedArgs);
+		const args = await enrichPiReviewMetadata(droidEnrichedArgs);
 		await ingestHookEvent(args);
 	} catch {
 		// Best effort only.
@@ -737,7 +746,8 @@ async function runHooksIngest(
 		const stdinPayload = await readStdinText();
 		const parsedArgs = parseHooksIngestArgs(event, options, payloadArg, stdinPayload);
 		const codexEnrichedArgs = await enrichCodexReviewMetadata(parsedArgs, process.cwd());
-		args = await enrichDroidReviewMetadata(codexEnrichedArgs);
+		const droidEnrichedArgs = await enrichDroidReviewMetadata(codexEnrichedArgs);
+		args = await enrichPiReviewMetadata(droidEnrichedArgs);
 	} catch (error) {
 		process.stderr.write(`kanban hooks ingest: ${formatError(error)}\n`);
 		process.exitCode = 1;

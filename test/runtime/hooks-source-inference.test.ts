@@ -36,6 +36,14 @@ describe("inferHookSourceFromPayload", () => {
 		).toBe("droid");
 	});
 
+	it("infers pi from session file path", () => {
+		expect(
+			inferHookSourceFromPayload({
+				session_file: "/Users/dev/.pi/agent/sessions/--repo--/session.jsonl",
+			}),
+		).toBe("pi");
+	});
+
 	it("falls back to codex event type when transcript path does not infer a source", () => {
 		expect(
 			inferHookSourceFromPayload({

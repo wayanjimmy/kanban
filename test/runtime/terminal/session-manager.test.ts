@@ -203,6 +203,56 @@ describe("TerminalSessionManager", () => {
 		expect(resizeMirrorSpy).toHaveBeenCalledWith(100, 30);
 	});
 
+	it("preserves carriage returns for Pi sessions", () => {
+		const manager = new TerminalSessionManager();
+		const writeSpy = vi.fn();
+		const entry = {
+			summary: createSummary({ taskId: "task-pi-input", agentId: "pi", state: "running" }),
+			active: {
+				session: {
+					write: writeSpy,
+				},
+			},
+			terminalStateMirror: null,
+			listenerIdCounter: 1,
+			listeners: new Map(),
+		};
+		(
+			manager as unknown as {
+				entries: Map<string, typeof entry>;
+			}
+		).entries.set("task-pi-input", entry);
+
+		manager.writeInput("task-pi-input", Buffer.from("hello\r", "utf8"));
+
+		expect(writeSpy).toHaveBeenCalledWith(Buffer.from("hello\r", "utf8"));
+	});
+
+	it("preserves carriage returns for non-Pi sessions", () => {
+		const manager = new TerminalSessionManager();
+		const writeSpy = vi.fn();
+		const entry = {
+			summary: createSummary({ taskId: "task-codex-input", agentId: "codex", state: "running" }),
+			active: {
+				session: {
+					write: writeSpy,
+				},
+			},
+			terminalStateMirror: null,
+			listenerIdCounter: 1,
+			listeners: new Map(),
+		};
+		(
+			manager as unknown as {
+				entries: Map<string, typeof entry>;
+			}
+		).entries.set("task-codex-input", entry);
+
+		manager.writeInput("task-codex-input", Buffer.from("hello\r", "utf8"));
+
+		expect(writeSpy).toHaveBeenCalledWith(Buffer.from("hello\r", "utf8"));
+	});
+
 	it("returns the latest terminal restore snapshot when available", async () => {
 		const manager = new TerminalSessionManager();
 		const getSnapshotSpy = vi.fn(async () => ({
